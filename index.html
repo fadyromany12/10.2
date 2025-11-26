@@ -2097,7 +2097,7 @@ body.dark-mode .dropdown-option.selected {
         <!--  TAB 14: Recruitment PANEL -->
         <!-- ================================== -->
 
-        <<div id="recruitment-panel" class="tab-panel">
+        <div id="recruitment-panel" class="tab-panel">
   <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px;">
     <h2>Recruitment & Hiring</h2>
     <div>
@@ -2344,67 +2344,87 @@ body.dark-mode .dropdown-option.selected {
       }
       // === TAB SWITCHING FUNCTION ===
       function showTab(tabName) {
-        // Hide all panels
-        document.querySelectorAll('.tab-panel').forEach(panel => {
-          panel.style.display = 'none';
-        });
+  // Hide all panels
+  document.querySelectorAll('.tab-panel').forEach(panel => {
+    panel.style.display = 'none';
+  });
 
-        // Deactivate all tab buttons
-        document.querySelectorAll('.tab-button').forEach(button => {
-          button.classList.remove('active');
-        });
-        
-        // Clear all status messages
-        document.querySelectorAll('.status-message').forEach(div => {
-            div.classList.remove('visible', 'success', 'error', 'processing');
-        });
+  // Deactivate all tab buttons
+  document.querySelectorAll('.tab-button').forEach(button => {
+    button.classList.remove('active');
+  });
 
-        // Show the correct panel and activate the correct button
-        document.getElementById(tabName + '-panel').style.display = 'block';
-        document.getElementById(tabName + '-tab-button').classList.add('active');
-        
-        // Refresh data when certain tabs are clicked
-        if (tabName === 'leave-approval') {
-         loadLeaveReport();
-         } else if (tabName === 'leave-request') {
-          loadMyRequests();
-          google.script.run.withSuccessHandler(user => {
-            if(user && user.myBalances) populateMyBalances(user.myBalances);
-          }).getUserInfo();
-        } else if (tabName === 'my-schedule') {
-          loadMySchedule();
-        } else if (tabName === 'dashboard') {
-           loadManagerHierarchy();
-           if (window.lastDashboardData) {
-               // Re-draw on tab switch to apply theme/resize changes
-               drawDashboard(window.lastDashboardData);
-           }
-        } else if (tabName === 'coaching') {
-          loadMyCoaching();
+  // Clear all status messages
+  document.querySelectorAll('.status-message').forEach(div => {
+    div.classList.remove('visible', 'success', 'error', 'processing');
+  });
 
-          } else if (tabName === 'profile') {
-   loadMyProfile();
-        
-        // *** ADD THIS ELSE IF BLOCK ***
-        } else if (tabName === 'registration-admin') {
-          loadRegistrationAdmin();
-        
-        // *** ADD THIS ELSE IF BLOCK ***
-        } else if (tabName === 'reporting-line') {
-          loadPendingMovements();
-          // Clear history list when tab is clicked
-          document.getElementById('movement-history-list').innerHTML = '<p class="text-color-secondary">Select a user to view their movement history.</p>';
-        // *** ADD THIS ELSE IF BLOCK ***
-        } else if (tabName === 'announcements-admin') {
-          loadAnnouncements_Admin();
-        } else if (tabName === 'recruitment') {
-          loadCandidates();
-        // Inside showTab(tabName) function:
-        } else if (tabName === 'performance') {
-          loadPerformanceTab();
-        }
-        
-      }
+  // Show the correct panel and activate the correct button
+  const panel = document.getElementById(tabName + '-panel');
+  const button = document.getElementById(tabName + '-tab-button');
+  
+  if (panel) panel.style.display = 'block';
+  if (button) button.classList.add('active');
+
+  // --- LAZY LOAD DROPDOWNS & DATA ---
+  // Only populate if the user list is loaded
+  if (allUsersList && allUsersList.length > 0) {
+    
+    if (tabName === 'admin-tools') {
+      // Fix: Admin Tools Dropdowns
+      populateAdminDropdown(allUsersList, selfUserName, 'manual-punch-user', 'Select User');
+      populateAdminDropdown(allUsersList, selfUserName, 'balance-user-select', 'Select User');
+      populateAdminDropdown(allUsersList, selfUserName, 'admin-leave-user', 'Select User');
+      populateAdminDropdown(allUsersList, selfUserName, 'offboard-user-select', 'Select Employee');
+    
+    } else if (tabName === 'reporting-line') {
+      // Fix: Reporting Line Dropdowns
+      populateAdminDropdown(allUsersList, selfUserName, 'reporting-line-user', 'Select User to Move');
+      populateAdminDropdown(allUsersList, selfUserName, 'reporting-line-supervisor', 'Select New Supervisor');
+      populateAdminDropdown(allUsersList, selfUserName, 'movement-history-user', 'Select User');
+      loadPendingMovements();
+      document.getElementById('movement-history-list').innerHTML = '<p class="text-color-secondary">Select a user to view their movement history.</p>';
+    
+    } else if (tabName === 'leave-approval') {
+      // Fix: Leave Approval Filter
+      populateAdminDropdown(allUsersList, selfUserName, 'leave-report-user', 'Filter by User (Optional)');
+      loadLeaveReport();
+    
+    } else if (tabName === 'history-report') {
+      // Fix: History Multi-Select
+      populateAdminDropdown(allUsersList, selfUserName, 'history', 'Select Users');
+      
+      // *** ADD THIS LINE TO UNHIDE THE DROPDOWN ***
+      document.getElementById('history-user-select-container').style.display = 'block';
+    
+    } else if (tabName === 'performance') {
+      loadPerformanceTab();
+    }
+  }
+
+  // Refresh specific tab data
+  if (tabName === 'leave-request') {
+    loadMyRequests();
+    google.script.run.withSuccessHandler(user => {
+      if (user && user.myBalances) populateMyBalances(user.myBalances);
+    }).getUserInfo();
+  } else if (tabName === 'my-schedule') {
+    loadMySchedule();
+  } else if (tabName === 'dashboard') {
+    loadManagerHierarchy();
+    if (window.lastDashboardData) drawDashboard(window.lastDashboardData);
+  } else if (tabName === 'coaching') {
+    loadMyCoaching();
+  } else if (tabName === 'profile') {
+    loadMyProfile();
+  } else if (tabName === 'registration-admin') {
+    loadRegistrationAdmin();
+  } else if (tabName === 'announcements-admin') {
+    loadAnnouncements_Admin();
+  } else if (tabName === 'recruitment') {
+    loadRecruitmentAdmin();
+  }
+}
       
       // --- Refresh User Info ---
       function refreshCurrentData() {
@@ -2448,7 +2468,6 @@ body.dark-mode .dropdown-option.selected {
           .getUserInfo();
       }
 
-      // NEW: Extracted user info population into its own function
       function populateUserInfo(user) {
   const infoDiv = document.getElementById('agent-info');
   if (!user || !user.name) {
@@ -2478,7 +2497,6 @@ body.dark-mode .dropdown-option.selected {
   
   document.getElementById('buttons').style.display = 'block';
   document.getElementById('other-buttons').style.display = 'block';
-  document.getElementById('my-schedule-tab-button').style.display = 'inline-block';
 
   // --- PERMISSIONS LOGIC ---
   const can = (perm) => user.permissions && user.permissions.includes(perm);
@@ -2488,17 +2506,25 @@ body.dark-mode .dropdown-option.selected {
       if(el) el.style.display = condition ? 'inline-block' : 'none';
   };
 
-  // Apply RBAC Visibility
+  // 1. Agent Tools (Visible to Everyone)
+  setDisplay('my-schedule-tab-button', true);
+  setDisplay('history-report-tab-button', true); // FIX: Always show History
+  setDisplay('coaching-tab-button', true);       // FIX: Always show Coaching
+  
+  // 2. Management Tools (RBAC)
   setDisplay('dashboard-tab-button', can('VIEW_FULL_DASHBOARD'));
-  setDisplay('schedule-tab-button', can('EDIT_SCHEDULE'));
   setDisplay('leave-approval-tab-button', can('APPROVE_LEAVE'));
-  setDisplay('recruitment-tab-button', can('MANAGE_RECRUITMENT'));
+  setDisplay('reporting-line-tab-button', can('MANAGE_HIERARCHY')); // FIX: Show based on Permission
+
+  // 3. Admin Tools (RBAC)
   setDisplay('finance-admin-tab-button', can('MANAGE_FINANCE'));
+  setDisplay('schedule-tab-button', can('EDIT_SCHEDULE'));
   setDisplay('project-admin-tab-button', can('MANAGE_PROJECTS'));
   setDisplay('admin-tools-tab-button', can('MANAGE_BALANCES') || can('PUNCH_OTHERS'));
   setDisplay('coaching-admin-tab-button', can('MANAGE_TEMPLATES'));
-  setDisplay('announcements-admin-tab-button', can('MANAGE_ANNOUNCEMENTS'));
   setDisplay('registration-admin-tab-button', can('HIRE_EMPLOYEE'));
+  setDisplay('announcements-admin-tab-button', can('MANAGE_ANNOUNCEMENTS'));
+  setDisplay('recruitment-tab-button', can('MANAGE_RECRUITMENT'));
   
   // Specific Logic for Panels
   if (can('PUNCH_OTHERS')) {
@@ -4714,12 +4740,10 @@ function loadMyCoaching() {
     })
     .webGetCoachingHistory(null);
 
-  // 2. Load Dropdown (NEW: Hierarchy Aware)
-  // Only fetch if user has coaching permissions
+  // 2. Load Dropdown (Hierarchy Aware) & SHOW FORM
   if (selfRole === 'admin' || selfRole === 'superadmin' || selfRole === 'manager') {
       const dropdownContainer = document.getElementById('coaching-agent-select-container');
       if (dropdownContainer) {
-          // Show a loading state in the dropdown
           dropdownContainer.innerHTML = '<span style="font-size:0.8rem; color:#666;">Loading team...</span>';
           
           google.script.run
@@ -4727,8 +4751,10 @@ function loadMyCoaching() {
                if (users.length === 0) {
                    dropdownContainer.innerHTML = '<span style="font-size:0.8rem; color:#666;">No subordinates found.</span>';
                } else {
-                   // Use the new component renderer we built in Part 4
                    populateAdminDropdown(users, selfUserName, 'coaching-agent-select', 'Select User to Coach');
+                   
+                   // *** ADD THIS LINE TO UNHIDE THE FORM ***
+                   document.getElementById('coaching-form-container').style.display = 'block';
                }
             })
             .withFailureHandler(err => {
