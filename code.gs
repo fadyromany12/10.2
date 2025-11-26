@@ -27,7 +27,8 @@ const SHEET_NAMES = {
   historyLogs: "Employee_History",
   warnings: "Warnings",
   financialEntitlements: "Financial_Entitlements",
-  rbac: "RBAC_Config" // NEW
+  rbac: "RBAC_Config",// NEW
+  overtime: "Overtime_Requests"
 };
 // --- Break Time Configuration (in seconds) ---
 const PLANNED_BREAK_SECONDS = 15 * 60; // 15 minutes
@@ -1756,8 +1757,6 @@ function getLatestPunchStatus(userEmail, userName, shiftDate, formattedDate) {
   for (let i = adherenceData.length - 1; i > 0; i--) {
     const row = adherenceData[i];
     if (row[1] === userName && Utilities.formatDate(new Date(row[0]), Session.getScriptTimeZone(), "MM/dd/yyyy") === formattedDate) {
-      // Found the user's row for today. Now find their last punch.
-      // Columns: Login (2), B1-In(3), B1-Out(4), L-In(5), L-Out(6), B2-In(7), B2-Out(8), Logout(9)
       const punches = [
         { name: "Login", time: row[2] },
         { name: "First Break In", time: row[3] },
@@ -1768,14 +1767,13 @@ function getLatestPunchStatus(userEmail, userName, shiftDate, formattedDate) {
         { name: "Last Break Out", time: row[8] },
         { name: "Logout", time: row[9] }
       ];
-
       for (const punch of punches) {
         if (punch.time instanceof Date && punch.time > lastAdherenceTime) {
           lastAdherenceTime = punch.time;
           lastAdherencePunch = punch.name;
         }
       }
-      break; // Found the right row, no need to search further
+      break;
     }
   }
 
@@ -1785,7 +1783,6 @@ function getLatestPunchStatus(userEmail, userName, shiftDate, formattedDate) {
     const row = otherCodesData[i];
     const rowShiftDate = getShiftDate(new Date(row[0]), SHIFT_CUTOFF_HOUR);
     if (row[1] === userName && Utilities.formatDate(rowShiftDate, Session.getScriptTimeZone(), "MM/dd/yyyy") === formattedDate) {
-      // Check both "In" (col 3) and "Out" (col 4)
       const timeIn = row[3];
       const timeOut = row[4];
       const code = row[2];
@@ -1814,13 +1811,13 @@ function getLatestPunchStatus(userEmail, userName, shiftDate, formattedDate) {
   }
 
   if (!lastPunchName) {
-    return null; // No punches found
+    // *** NEW: Still try to return schedule info even if no punch ***
+    return { status: "Logged Out", time: null, schedule: getScheduleForDate(userEmail, shiftDate) };
   }
 
   // 4. Determine logical *current* status
   let currentStatus = "Logged Out";
   if (lastPunchName.endsWith(" In")) {
-    // "Login", "First Break In", "Lunch In", "Coaching In", etc.
     currentStatus = lastPunchName.replace(" In", "");
     if (currentStatus === "Login") {
        currentStatus = "Logged In";
@@ -1828,16 +1825,68 @@ function getLatestPunchStatus(userEmail, userName, shiftDate, formattedDate) {
        currentStatus = `On ${currentStatus}`;
     }
   } else if (lastPunchName.endsWith(" Out") && lastPunchName !== "Logout") {
-    // "First Break Out", "Lunch Out", "Coaching Out", etc.
-    currentStatus = "Logged In"; // After a break/meeting ends, status is Logged In
+    currentStatus = "Logged In";
   } else if (lastPunchName === "Logout") {
     currentStatus = "Logged Out";
   }
 
+  // *** NEW: Fetch Schedule Info for Phase 8 ***
+  const scheduleInfo = getScheduleForDate(userEmail, shiftDate);
+
   return {
     status: currentStatus,
-    time: convertDateToString(lastPunchTime) // Use existing helper
+    time: convertDateToString(lastPunchTime),
+    schedule: scheduleInfo // Send schedule back to frontend
   };
+}
+
+function getScheduleForDate(userEmail, dateObj) {
+  const ss = getSpreadsheet();
+  const sheet = getOrCreateSheet(ss, SHEET_NAMES.schedule);
+  const data = sheet.getDataRange().getValues();
+  const timeZone = Session.getScriptTimeZone();
+  const targetDateStr = Utilities.formatDate(dateObj, timeZone, "MM/dd/yyyy");
+
+  for (let i = 1; i < data.length; i++) {
+    // Col 7 (Index 6) is email, Col 2 (Index 1) is Date
+    if (String(data[i][6]).toLowerCase() === userEmail.toLowerCase()) {
+      const rowDate = data[i][1];
+      if (rowDate instanceof Date && Utilities.formatDate(rowDate, timeZone, "MM/dd/yyyy") === targetDateStr) {
+        // Found Schedule
+        // Need Start (Col C/2) and End (Col E/4)
+        // Note: Schedule sheet format: Name, StartDate, StartTime, EndDate, EndTime...
+        
+        let startTime = data[i][2];
+        let endTime = data[i][4];
+        
+        // Handle cross-day shifts logic if needed, but for timer we just need the objects
+        // We assume the schedule sheet stores them as Date objects or strings.
+        // We need to reconstruct the full DateTime for the specific day.
+        
+        let startDateTime = null;
+        let endDateTime = null;
+
+        if (startTime) startDateTime = createDateTime(dateObj, Utilities.formatDate(startTime instanceof Date ? startTime : new Date("1/1/1970 " + startTime), timeZone, "HH:mm:ss"));
+        
+        // Check if end time is next day (if end < start)
+        if (endTime) {
+           const endStr = Utilities.formatDate(endTime instanceof Date ? endTime : new Date("1/1/1970 " + endTime), timeZone, "HH:mm:ss");
+           let baseEndDate = new Date(dateObj);
+           endDateTime = createDateTime(baseEndDate, endStr);
+           
+           if (startDateTime && endDateTime && endDateTime < startDateTime) {
+             endDateTime.setDate(endDateTime.getDate() + 1);
+           }
+        }
+
+        return {
+          start: convertDateToString(startDateTime),
+          end: convertDateToString(endDateTime)
+        };
+      }
+    }
+  }
+  return null;
 }
 
 // REPLACE this function in your code.gs file
@@ -5321,87 +5370,7 @@ function getPermissionsMap(ss) {
   return map;
 }
 
-function _MASTER_DB_FIXER() {
-  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
-  Logger.log("Starting Master DB Fixer...");
 
-  // 1. Define Schema
-  const schema = {
-    [SHEET_NAMES.rbac]: ["PermissionID", "Description", "superadmin", "admin", "manager", "financial_manager", "agent"],
-    [SHEET_NAMES.employeesCore]: ["EmployeeID", "Name", "Email", "Role", "AccountStatus", "DirectManagerEmail", "FunctionalManagerEmail", "AnnualBalance", "SickBalance", "CasualBalance", "Gender", "EmploymentType", "ContractType", "JobLevel", "Department", "Function", "SubFunction", "GCMLevel", "Scope", "OffshoreOnshore", "DottedManager", "ProjectManagerEmail", "BonusPlan", "N_Level", "ExitDate", "Status"],
-    [SHEET_NAMES.employeesPII]: ["EmployeeID", "HiringDate", "Salary", "IBAN", "Address", "Phone", "MedicalInfo", "ContractType", "NationalID", "PassportNumber", "SocialInsuranceNumber", "BirthDate", "PersonalEmail", "MaritalStatus", "DependentsInfo", "EmergencyContact", "EmergencyRelation", "BasicSalary", "VariablePay", "HourlyRate"],
-    [SHEET_NAMES.financialEntitlements]: ["EntitlementID", "EmployeeEmail", "EmployeeName", "Type", "Amount", "Currency", "DueDate", "Status", "Description", "AddedBy", "DateAdded"],
-    [SHEET_NAMES.pendingRegistrations]: ["RequestID", "UserEmail", "UserName", "DirectManagerEmail", "FunctionalManagerEmail", "DirectStatus", "FunctionalStatus", "Address", "Phone", "RequestTimestamp", "HiringDate", "WorkflowStage"],
-    [SHEET_NAMES.recruitment]: ["CandidateID", "Name", "Email", "Phone", "Position", "CV_Link", "Status", "Stage", "InterviewScores", "AppliedDate", "NationalID", "LangLevel", "SecondLang", "Referrer", "HR_Feedback", "Mgmt_Feedback", "Tech_Feedback", "Client_Feedback", "OfferStatus", "RejectionReason", "HistoryLog"],
-    [SHEET_NAMES.requisitions]: ["ReqID", "Title", "Department", "HiringManager", "OpenDate", "Status", "PoolCandidates", "JobDescription"],
-    [SHEET_NAMES.performance]: ["ReviewID", "EmployeeID", "Year", "ReviewPeriod", "Rating", "ManagerComments", "Date"],
-    [SHEET_NAMES.historyLogs]: ["HistoryID", "EmployeeID", "Date", "EventType", "OldValue", "NewValue"],
-    [SHEET_NAMES.adherence]: ["Date", "User Name", "Login", "First Break In", "First Break Out", "Lunch In", "Lunch Out", "Last Break In", "Last Break Out", "Logout", "Tardy (Seconds)", "Overtime (Seconds)", "Early Leave (Seconds)", "Leave Type", "Admin Audit", "—", "1st Break Exceed", "Lunch Exceed", "Last Break Exceed", "Absent", "Admin Code"],
-    [SHEET_NAMES.schedule]: ["Name", "StartDate", "ShiftStartTime", "EndDate", "ShiftEndTime", "LeaveType", "agent email"],
-    [SHEET_NAMES.logs]: ["Timestamp", "User Name", "Email", "Action", "Time"],
-    [SHEET_NAMES.otherCodes]: ["Date", "User Name", "Code", "Time In", "Time Out", "Duration (Seconds)", "Admin Audit (Email)"],
-    [SHEET_NAMES.warnings]: ["WarningID", "EmployeeID", "Type", "Level", "Date", "Description", "Status", "IssuedBy"],
-    [SHEET_NAMES.coachingSessions]: ["SessionID", "AgentEmail", "AgentName", "CoachEmail", "CoachName", "SessionDate", "WeekNumber", "OverallScore", "FollowUpComment", "SubmissionTimestamp", "FollowUpDate", "FollowUpStatus", "AgentAcknowledgementTimestamp"],
-    [SHEET_NAMES.coachingScores]: ["SessionID", "Category", "Criteria", "Score", "Comment"],
-    [SHEET_NAMES.coachingTemplates]: ["TemplateName", "Category", "Criteria", "Status"],
-    [SHEET_NAMES.leaveRequests]: ["RequestID", "Status", "RequestedByEmail", "RequestedByName", "LeaveType", "StartDate", "EndDate", "TotalDays", "Reason", "ActionDate", "ActionBy", "SupervisorEmail", "ActionReason", "SickNoteURL", "DirectManagerSnapshot", "ProjectManagerSnapshot"],
-    [SHEET_NAMES.movementRequests]: ["MovementID", "Status", "UserToMoveEmail", "UserToMoveName", "FromSupervisorEmail", "ToSupervisorEmail", "RequestTimestamp", "ActionTimestamp", "ActionByEmail", "RequestedByEmail"],
-    [SHEET_NAMES.roleRequests]: ["RequestID", "UserEmail", "UserName", "CurrentRole", "RequestedRole", "Justification", "RequestTimestamp", "Status", "ActionByEmail", "ActionTimestamp"],
-    [SHEET_NAMES.projects]: ["ProjectID", "ProjectName", "ProjectManagerEmail", "AllowedRoles"],
-    [SHEET_NAMES.projectLogs]: ["LogID", "EmployeeID", "ProjectID", "Date", "HoursLogged"],
-    [SHEET_NAMES.announcements]: ["AnnouncementID", "Content", "Status", "CreatedByEmail", "Timestamp"],
-    [SHEET_NAMES.assets]: ["AssetID", "Type", "AssignedTo_EmployeeID", "DateAssigned", "Status"]
-  };
-
-  // 2. Run Fixer
-  for (const [sheetName, headers] of Object.entries(schema)) {
-    let sheet = getOrCreateSheet(ss, sheetName);
-    const lastCol = sheet.getLastColumn();
-    let currentHeaders = [];
-    
-    // Only fetch headers if the sheet is not empty
-    if (lastCol > 0) {
-      currentHeaders = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
-    }
-
-    const missingCols = [];
-    headers.forEach(h => { if (!currentHeaders.includes(h)) missingCols.push(h); });
-
-    if (missingCols.length > 0) {
-      // Append to the next available column (startCol = 1 if empty, else lastCol + 1)
-      const startCol = lastCol === 0 ? 1 : lastCol + 1;
-      sheet.getRange(1, startCol, 1, missingCols.length).setValues([missingCols]);
-      Logger.log(`Updated ${sheetName}: Added [${missingCols.join(', ')}]`);
-    }
-  }
-
-  // 3. Populate Permissions (RBAC)
-  const rbacSheet = ss.getSheetByName(SHEET_NAMES.rbac);
-  if (rbacSheet.getLastRow() <= 1) {
-    const permissions = [
-      ["PUNCH_OTHERS", "Clock in others", true, true, true, false, false],
-      ["EDIT_SCHEDULE", "Manage Schedules", true, true, true, false, false],
-      ["APPROVE_LEAVE", "Approve Leave", true, true, true, false, false],
-      ["MANAGE_BALANCES", "Edit Leave Balances", true, true, false, false, false],
-      ["MANAGE_RECRUITMENT", "Hire/Reject Candidates", true, false, false, false, false],
-      ["HIRE_EMPLOYEE", "Finalize Hiring", true, false, false, false, false],
-      ["OFFBOARD_EMPLOYEE", "Terminate Staff", true, true, false, false, false],
-      ["SUBMIT_COACHING", "Perform Coaching", true, true, true, false, false],
-      ["MANAGE_TEMPLATES", "Edit Coaching Forms", true, true, false, false, false],
-      ["MANAGE_FINANCE", "Payroll/Bonuses", true, false, false, true, false],
-      ["MANAGE_PROJECTS", "Create Projects", true, true, false, false, false],
-      ["MANAGE_ANNOUNCEMENTS", "Post Announcements", true, false, false, false, false],
-      ["VIEW_FULL_DASHBOARD", "See Team Stats", true, true, true, false, false],
-      ["MANAGE_HIERARCHY", "Move Reporting Lines", true, true, false, false, false],
-      ["MANAGE_RBAC", "Edit Permissions", true, false, false, false, false],
-      ["SUBMIT_PERFORMANCE", "Submit Reviews", true, true, true, false, false] // Added for Phase 5
-    ];
-    rbacSheet.getRange(2, 1, permissions.length, 7).setValues(permissions);
-    Logger.log("RBAC Permissions Populated.");
-  }
-  
-  Logger.log("Master DB Fix Complete.");
-}
 
 // ==========================================
 // === PHASE 7: HR ADMIN & PII TOOLS ===
@@ -5528,6 +5497,256 @@ function webGetPendingDataChanges() {
   }
   return requests;
 }
+
+
+
+// ==========================================
+// === PHASE 8: OVERTIME MANAGEMENT API ===
+// ==========================================
+
+/**
+ * AGENT: Request Overtime
+ */
+function webSubmitOvertimeRequest(requestData) {
+  const { userEmail, userData, ss } = getAuthorizedContext(null);
+  const otSheet = getOrCreateSheet(ss, SHEET_NAMES.overtime);
+  
+  const shiftDate = new Date(requestData.date);
+  
+  // 1. Validate Schedule
+  const schedule = getScheduleForDate(userEmail, shiftDate);
+  if (!schedule || !schedule.end) {
+    throw new Error("No schedule found for this date. Cannot request overtime.");
+  }
+
+  const reqID = `OT-${new Date().getTime()}`;
+  
+  otSheet.appendRow([
+    reqID,
+    userData.userList.find(u=>u.email === userEmail)?.empID || "",
+    userData.userName,
+    shiftDate,
+    new Date(schedule.start),
+    new Date(schedule.end),
+    requestData.hours,
+    requestData.reason,
+    "Pending",
+    "", // Manager Comment
+    "", // Action By
+    ""  // Action Date
+  ]);
+  
+  return "Overtime request submitted.";
+}
+
+/**
+ * MANAGER: Get Overtime Requests (Pending or All)
+ */
+function webGetOvertimeRequests(filterStatus) {
+  const { userEmail, userData, ss } = getAuthorizedContext(null); // Check logic inside
+  const otSheet = getOrCreateSheet(ss, SHEET_NAMES.overtime);
+  const data = otSheet.getDataRange().getValues();
+  
+  const results = [];
+  // Col Indexes: 0:ID, 1:EmpID, 2:Name, 3:Date, 4:Start, 5:End, 6:Hours, 7:Reason, 8:Status
+  
+  // Permissions check
+  const isManager = (userData.userRole === 'manager' || userData.userRole === 'admin' || userData.userRole === 'superadmin');
+  const mySubordinates = isManager ? new Set(webGetAllSubordinateEmails(userEmail)) : new Set();
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const status = row[8];
+    const empName = row[2]; // We don't store email in OT sheet? We should have.
+    // Fix: I missed storing Email in webSubmitOvertimeRequest. 
+    // Let's assume we filter by Name match or add Email column. 
+    // Ideally, adding Email column is best. 
+    // For now, let's match strictly by hierarchy if manager, or self if agent.
+    
+    // To make it robust, let's fix the appendRow in webSubmitOvertimeRequest first?
+    // Actually, let's just fetch the EmpID and look up the email from userData.
+    const empID = row[1];
+    const userObj = userData.userList.find(u => u.empID === empID);
+    const rowEmail = userObj ? userObj.email : "";
+
+    let canView = false;
+    
+    if (isManager) {
+      if (userData.userRole === 'superadmin') canView = true;
+      else if (mySubordinates.has(rowEmail)) canView = true;
+    } else {
+      if (rowEmail === userEmail) canView = true; // Agent sees own
+    }
+
+    if (canView) {
+      if (filterStatus === 'All' || status === filterStatus) {
+        results.push({
+          id: row[0],
+          name: row[2],
+          date: convertDateToString(new Date(row[3])).split('T')[0],
+          plannedEnd: row[5] ? Utilities.formatDate(new Date(row[5]), Session.getScriptTimeZone(), "HH:mm") : "N/A",
+          hours: row[6],
+          reason: row[7],
+          status: status,
+          comment: row[9]
+        });
+      }
+    }
+  }
+  return results.reverse();
+}
+
+/**
+ * MANAGER: Approve/Deny or Pre-Approve
+ */
+function webActionOvertime(reqId, action, comment, preApproveData) {
+  const { userEmail, ss } = getAuthorizedContext('MANAGE_OVERTIME');
+  const otSheet = getOrCreateSheet(ss, SHEET_NAMES.overtime);
+  
+  // CASE 1: Pre-Approval (Creating a new Approved request)
+  if (action === 'Pre-Approve') {
+    const targetEmail = preApproveData.email;
+    const userData = getUserDataFromDb(ss);
+    const targetUser = userData.userList.find(u => u.email === targetEmail);
+    if (!targetUser) throw new Error("User not found.");
+    
+    const schedule = getScheduleForDate(targetEmail, new Date(preApproveData.date));
+    if (!schedule) throw new Error("No schedule found for user on this date.");
+
+    const newID = `OT-PRE-${new Date().getTime()}`;
+    otSheet.appendRow([
+      newID,
+      targetUser.empID,
+      targetUser.name,
+      new Date(preApproveData.date),
+      new Date(schedule.start),
+      new Date(schedule.end),
+      preApproveData.hours,
+      "Pre-Approved by Manager",
+      "Approved",
+      comment || "Pre-approved",
+      userEmail,
+      new Date()
+    ]);
+    return "Overtime pre-approved successfully.";
+  }
+
+  // CASE 2: Action Existing Request
+  const data = otSheet.getDataRange().getValues();
+  let rowIndex = -1;
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === reqId) {
+      rowIndex = i + 1;
+      break;
+    }
+  }
+  if (rowIndex === -1) throw new Error("Request not found.");
+  
+  // Update Status (Col I = 9), Comment (Col J = 10), ActionBy (Col K = 11), ActionDate
+  otSheet.getRange(rowIndex, 9).setValue(action); // Approved/Denied
+  otSheet.getRange(rowIndex, 10).setValue(comment);
+  otSheet.getRange(rowIndex, 11).setValue(userEmail);
+  otSheet.getRange(rowIndex, 12).setValue(new Date());
+  
+  return `Request ${action}.`;
+}
+
+
+
+
+//.............................................................................................................................
+
+
+
+
+
+
+
+function _MASTER_DB_FIXER() {
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
+  Logger.log("Starting Master DB Fixer...");
+
+  // 1. Define Schema
+  const schema = {
+    [SHEET_NAMES.rbac]: ["PermissionID", "Description", "superadmin", "admin", "manager", "financial_manager", "agent"],
+    [SHEET_NAMES.employeesCore]: ["EmployeeID", "Name", "Email", "Role", "AccountStatus", "DirectManagerEmail", "FunctionalManagerEmail", "AnnualBalance", "SickBalance", "CasualBalance", "Gender", "EmploymentType", "ContractType", "JobLevel", "Department", "Function", "SubFunction", "GCMLevel", "Scope", "OffshoreOnshore", "DottedManager", "ProjectManagerEmail", "BonusPlan", "N_Level", "ExitDate", "Status"],
+    [SHEET_NAMES.employeesPII]: ["EmployeeID", "HiringDate", "Salary", "IBAN", "Address", "Phone", "MedicalInfo", "ContractType", "NationalID", "PassportNumber", "SocialInsuranceNumber", "BirthDate", "PersonalEmail", "MaritalStatus", "DependentsInfo", "EmergencyContact", "EmergencyRelation", "BasicSalary", "VariablePay", "HourlyRate"],
+    [SHEET_NAMES.financialEntitlements]: ["EntitlementID", "EmployeeEmail", "EmployeeName", "Type", "Amount", "Currency", "DueDate", "Status", "Description", "AddedBy", "DateAdded"],
+    [SHEET_NAMES.pendingRegistrations]: ["RequestID", "UserEmail", "UserName", "DirectManagerEmail", "FunctionalManagerEmail", "DirectStatus", "FunctionalStatus", "Address", "Phone", "RequestTimestamp", "HiringDate", "WorkflowStage"],
+    [SHEET_NAMES.recruitment]: ["CandidateID", "Name", "Email", "Phone", "Position", "CV_Link", "Status", "Stage", "InterviewScores", "AppliedDate", "NationalID", "LangLevel", "SecondLang", "Referrer", "HR_Feedback", "Mgmt_Feedback", "Tech_Feedback", "Client_Feedback", "OfferStatus", "RejectionReason", "HistoryLog"],
+    [SHEET_NAMES.requisitions]: ["ReqID", "Title", "Department", "HiringManager", "OpenDate", "Status", "PoolCandidates", "JobDescription"],
+    [SHEET_NAMES.performance]: ["ReviewID", "EmployeeID", "Year", "ReviewPeriod", "Rating", "ManagerComments", "Date"],
+    [SHEET_NAMES.historyLogs]: ["HistoryID", "EmployeeID", "Date", "EventType", "OldValue", "NewValue"],
+    [SHEET_NAMES.adherence]: ["Date", "User Name", "Login", "First Break In", "First Break Out", "Lunch In", "Lunch Out", "Last Break In", "Last Break Out", "Logout", "Tardy (Seconds)", "Overtime (Seconds)", "Early Leave (Seconds)", "Leave Type", "Admin Audit", "—", "1st Break Exceed", "Lunch Exceed", "Last Break Exceed", "Absent", "Admin Code"],
+    [SHEET_NAMES.schedule]: ["Name", "StartDate", "ShiftStartTime", "EndDate", "ShiftEndTime", "LeaveType", "agent email"],
+    [SHEET_NAMES.logs]: ["Timestamp", "User Name", "Email", "Action", "Time"],
+    [SHEET_NAMES.otherCodes]: ["Date", "User Name", "Code", "Time In", "Time Out", "Duration (Seconds)", "Admin Audit (Email)"],
+    [SHEET_NAMES.warnings]: ["WarningID", "EmployeeID", "Type", "Level", "Date", "Description", "Status", "IssuedBy"],
+    [SHEET_NAMES.coachingSessions]: ["SessionID", "AgentEmail", "AgentName", "CoachEmail", "CoachName", "SessionDate", "WeekNumber", "OverallScore", "FollowUpComment", "SubmissionTimestamp", "FollowUpDate", "FollowUpStatus", "AgentAcknowledgementTimestamp"],
+    [SHEET_NAMES.coachingScores]: ["SessionID", "Category", "Criteria", "Score", "Comment"],
+    [SHEET_NAMES.coachingTemplates]: ["TemplateName", "Category", "Criteria", "Status"],
+    [SHEET_NAMES.leaveRequests]: ["RequestID", "Status", "RequestedByEmail", "RequestedByName", "LeaveType", "StartDate", "EndDate", "TotalDays", "Reason", "ActionDate", "ActionBy", "SupervisorEmail", "ActionReason", "SickNoteURL", "DirectManagerSnapshot", "ProjectManagerSnapshot"],
+    [SHEET_NAMES.movementRequests]: ["MovementID", "Status", "UserToMoveEmail", "UserToMoveName", "FromSupervisorEmail", "ToSupervisorEmail", "RequestTimestamp", "ActionTimestamp", "ActionByEmail", "RequestedByEmail"],
+    [SHEET_NAMES.roleRequests]: ["RequestID", "UserEmail", "UserName", "CurrentRole", "RequestedRole", "Justification", "RequestTimestamp", "Status", "ActionByEmail", "ActionTimestamp"],
+    [SHEET_NAMES.projects]: ["ProjectID", "ProjectName", "ProjectManagerEmail", "AllowedRoles"],
+    [SHEET_NAMES.projectLogs]: ["LogID", "EmployeeID", "ProjectID", "Date", "HoursLogged"],
+    [SHEET_NAMES.announcements]: ["AnnouncementID", "Content", "Status", "CreatedByEmail", "Timestamp"],
+    [SHEET_NAMES.assets]: ["AssetID", "Type", "AssignedTo_EmployeeID", "DateAssigned", "Status"],
+    [SHEET_NAMES.overtime]: ["RequestID", "EmployeeID", "EmployeeName", "ShiftDate", "PlannedStart", "PlannedEnd", "RequestedHours", "Reason", "Status", "ManagerComment", "ActionBy", "ActionDate"]
+  };
+
+  // 2. Run Fixer
+  for (const [sheetName, headers] of Object.entries(schema)) {
+    let sheet = getOrCreateSheet(ss, sheetName);
+    const lastCol = sheet.getLastColumn();
+    let currentHeaders = [];
+    
+    // Only fetch headers if the sheet is not empty
+    if (lastCol > 0) {
+      currentHeaders = sheet.getRange(1, 1, 1, lastCol).getValues()[0];
+    }
+
+    const missingCols = [];
+    headers.forEach(h => { if (!currentHeaders.includes(h)) missingCols.push(h); });
+
+    if (missingCols.length > 0) {
+      // Append to the next available column (startCol = 1 if empty, else lastCol + 1)
+      const startCol = lastCol === 0 ? 1 : lastCol + 1;
+      sheet.getRange(1, startCol, 1, missingCols.length).setValues([missingCols]);
+      Logger.log(`Updated ${sheetName}: Added [${missingCols.join(', ')}]`);
+    }
+  }
+
+  // 3. Populate Permissions (RBAC)
+  const rbacSheet = ss.getSheetByName(SHEET_NAMES.rbac);
+  if (rbacSheet.getLastRow() <= 1) {
+    const permissions = [
+      ["PUNCH_OTHERS", "Clock in others", true, true, true, false, false],
+      ["EDIT_SCHEDULE", "Manage Schedules", true, true, true, false, false],
+      ["APPROVE_LEAVE", "Approve Leave", true, true, true, false, false],
+      ["MANAGE_BALANCES", "Edit Leave Balances", true, true, false, false, false],
+      ["MANAGE_RECRUITMENT", "Hire/Reject Candidates", true, false, false, false, false],
+      ["HIRE_EMPLOYEE", "Finalize Hiring", true, false, false, false, false],
+      ["OFFBOARD_EMPLOYEE", "Terminate Staff", true, true, false, false, false],
+      ["SUBMIT_COACHING", "Perform Coaching", true, true, true, false, false],
+      ["MANAGE_TEMPLATES", "Edit Coaching Forms", true, true, false, false, false],
+      ["MANAGE_FINANCE", "Payroll/Bonuses", true, false, false, true, false],
+      ["MANAGE_PROJECTS", "Create Projects", true, true, false, false, false],
+      ["MANAGE_ANNOUNCEMENTS", "Post Announcements", true, false, false, false, false],
+      ["VIEW_FULL_DASHBOARD", "See Team Stats", true, true, true, false, false],
+      ["MANAGE_HIERARCHY", "Move Reporting Lines", true, true, false, false, false],
+      ["MANAGE_RBAC", "Edit Permissions", true, false, false, false, false],
+      ["SUBMIT_PERFORMANCE", "Submit Reviews", true, true, true, false, false], // Added for Phase 5
+      ["MANAGE_OVERTIME", "Approve/Pre-approve Overtime", true, true, true, false, false] // NEW PHASE 8
+    ];
+    rbacSheet.getRange(2, 1, permissions.length, 7).setValues(permissions);
+    Logger.log("RBAC Permissions Populated.");
+  }
+  
+  Logger.log("Master DB Fix Complete.");
+}
+
+
 
 /**
  * MIGRATION: Import users from 'Data Base' to 'Employees_Core' and 'Employees_PII'.
