@@ -1367,6 +1367,10 @@ body.dark-mode .dropdown-option.selected {
             <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="8.5" cy="7" r="4"></circle><polyline points="17 11 19 13 23 9"></polyline></svg>
             <span class="nav-button-text">Reporting Line</span>
           </button>
+          <button id="overtime-tab-button" class="tab-button" onclick="showTab('overtime')">
+            <span class="nav-icon">⏱</span>
+            <span class="nav-button-text">Overtime</span>
+          </button>
           <!-- MODIFIED: Coaching tab removed from here -->
         </div>
 
@@ -2316,6 +2320,78 @@ body.dark-mode .dropdown-option.selected {
   <div id="migration-status" class="status-message"></div>
 
 </div>
+
+        <!-- ================================== -->
+        <!--  TAB 1: Overtime PANEL -->
+        <!-- ================================== -->
+
+
+<div id="overtime-panel" class="tab-panel">
+  <h2>Overtime Management</h2>
+  
+  <div id="ot-manager-section" style="display:none; margin-bottom: 20px; padding: 20px; background: var(--input-bg); border-radius: 8px;">
+    <h3 style="margin-top:0; color: var(--konecta-blue);">Pre-Approve Overtime</h3>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Select Employee</label>
+        <div id="ot-employee-select-container"></div>
+      </div>
+      <div class="form-group">
+        <label>Date</label>
+        <input type="date" id="ot-pre-date">
+      </div>
+    </div>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Hours Allowed</label>
+        <input type="number" id="ot-pre-hours" step="0.5" placeholder="e.g. 2">
+      </div>
+      <div class="form-group">
+        <label>Comment</label>
+        <input type="text" id="ot-pre-comment" placeholder="Project requirement...">
+      </div>
+    </div>
+    <button class="btn-primary" onclick="submitPreApproval()">Pre-Approve</button>
+  </div>
+
+  <div class="form-container">
+    <h3>Request Overtime</h3>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Date</label>
+        <input type="date" id="ot-req-date">
+      </div>
+      <div class="form-group">
+        <label>Requested Hours</label>
+        <input type="number" id="ot-req-hours" step="0.5">
+      </div>
+    </div>
+    <div class="form-group">
+      <label>Reason</label>
+      <input type="text" id="ot-req-reason" placeholder="Why is overtime needed?">
+    </div>
+    <button class="btn-primary" onclick="submitOtRequest()">Submit Request</button>
+    <div id="ot-status" class="status-message"></div>
+  </div>
+
+  <hr class="section-divider">
+
+  <div style="display: flex; justify-content: space-between; align-items: center;">
+    <h3>Overtime Requests</h3>
+    <div class="form-group" style="margin: 0; width: 150px;">
+        <select id="ot-filter-status" onchange="loadOvertimeRequests()">
+            <option value="Pending">Pending</option>
+            <option value="Approved">Approved</option>
+            <option value="Denied">Denied</option>
+            <option value="All">All</option>
+        </select>
+    </div>
+  </div>
+  
+  <div id="ot-request-list" class="request-list">
+    <p class="text-color-secondary">Loading...</p>
+  </div>
+</div>
         
       </main> <!-- End #app-content -->
       
@@ -2498,6 +2574,8 @@ function showTab(tabName) {
     
     } else if (tabName === 'hr-admin') {
       loadHrAdmin(); // New Phase 7 Function
+    } else if (tabName === 'overtime') {
+    loadOvertimeTab();
     }
   }
 
@@ -2608,6 +2686,8 @@ function populateUserInfo(user) {
   setDisplay('my-schedule-tab-button', true);
   setDisplay('history-report-tab-button', true);
   setDisplay('coaching-tab-button', true);
+  
+  setDisplay('overtime-tab-button', true); // Visible to all (Agents request, Managers approve)
   
   // 2. Management Tools (RBAC)
   setDisplay('dashboard-tab-button', can('VIEW_FULL_DASHBOARD'));
@@ -2734,7 +2814,9 @@ function populateAdminDropdown(users, selfName, dropdownId, selfText) {
     
     // --- NEW HR ADMIN MAPPINGS (Add these lines) ---
     'hr-balance-user-select': 'hr-balance-user-select-container',
-    'hr-offboard-user-select': 'hr-offboard-user-select-container'
+    'hr-offboard-user-select': 'hr-offboard-user-select-container',
+    'ot-employee-select': 'ot-employee-select-container' // NEW PHASE 8
+  
   };
 
   // Special Handling for History (Multi-Select)
@@ -2932,165 +3014,95 @@ function submitSchedule() {
       // --- NEW: Dynamic Status Timer ---
       let statusTimer = null;
 
-/**
-       * (REPLACE THIS FUNCTION in your <script> tag)
-       * Updates the new #current-status-display with live elapsed time
-       * AND manages the enabled/disabled state of punch buttons.
-       * *** NOW INCLUDES EXCEED WARNINGS ***
-       */
-      function updateCurrentStatus(statusInfo) {
-        if (statusTimer) {
-          clearInterval(statusTimer); // Stop any existing timer
-        }
+function updateCurrentStatus(statusInfo) {
+  if (statusTimer) clearInterval(statusTimer);
 
-        const displayDiv = document.getElementById('current-status-display');
-        
-        // --- Button State Logic ---
-        setAllPunchButtonsDisabled(true); // Disable all by default
+  const displayDiv = document.getElementById('current-status-display');
+  
+  // Handle Logged Out
+  if (!statusInfo || !statusInfo.status || statusInfo.status === 'Logged Out') {
+    displayDiv.style.visibility = 'hidden';
+    setAllPunchButtonsDisabled(true);
+    document.querySelector('button[onclick="punch(\'Login\')"]').disabled = false;
+    return;
+  }
 
-        if (!statusInfo || !statusInfo.status || statusInfo.status === 'Logged Out') {
-          displayDiv.style.visibility = 'hidden';
-          // 1. Logged Out State: Only Login is enabled
-          document.querySelector('button[onclick="punch(\'Login\')"]').disabled = false;
-          return; // Stop here
-        }
+  const punchTime = new Date(statusInfo.time);
+  
+  // *** PHASE 8 LOGIC: Calculate Shift End ***
+  let shiftEnd = null;
+  if (statusInfo.schedule && statusInfo.schedule.end) {
+    shiftEnd = new Date(statusInfo.schedule.end);
+  }
 
-        const punchTime = new Date(statusInfo.time);
-        
-        const updateText = () => {
-          const now = new Date();
-          const diffMs = now.getTime() - punchTime.getTime();
-          const diffSec = Math.floor(diffMs / 1000);
-          
-          let elapsedStr = '';
-          if (diffSec < 60) {
-            elapsedStr = `${diffSec}s ago`;
-          } else if (diffSec < 3600) {
-            elapsedStr = `${Math.floor(diffSec / 60)}m ${diffSec % 60}s ago`;
-          } else {
-            const h = Math.floor(diffSec / 3600);
-            const m = Math.floor((diffSec % 3600) / 60);
-            elapsedStr = `${h}h ${m}m ago`;
-          }
+  const updateText = () => {
+    const now = new Date();
+    const diffMs = now.getTime() - punchTime.getTime();
+    const diffSec = Math.floor(diffMs / 1000);
+    
+    let elapsedStr = '';
+    if (diffSec < 60) elapsedStr = `${diffSec}s ago`;
+    else if (diffSec < 3600) elapsedStr = `${Math.floor(diffSec / 60)}m ${diffSec % 60}s ago`;
+    else elapsedStr = `${Math.floor(diffSec / 3600)}h ${Math.floor((diffSec % 3600) / 60)}m ago`;
 
-          let statusClass = getStatusClass(statusInfo.status);
-          if (statusInfo.status === 'Logged In') statusClass = 'Logged-In'; 
+    let statusClass = getStatusClass(statusInfo.status);
+    if (statusInfo.status === 'Logged In') statusClass = 'Logged-In';
 
-          displayDiv.className = `status-message visible status-${statusClass}`;
-          displayDiv.style.visibility = 'visible';
-          
-          // --- NEW: Exceed Warning Logic ---
-          let exceedWarning = "";
-          let plannedSeconds = 0;
-          
-          if (statusInfo.status === 'On First Break' || statusInfo.status === 'On Last Break') {
-            plannedSeconds = PLANNED_BREAK_SECONDS;
-          } else if (statusInfo.status === 'On Lunch') {
-            plannedSeconds = PLANNED_LUNCH_SECONDS;
-          }
-          
-          if (plannedSeconds > 0 && diffSec > plannedSeconds) {
-            const exceededSeconds = diffSec - plannedSeconds;
-            const ex_m = Math.floor(exceededSeconds / 60);
-            const ex_s = exceededSeconds % 60;
-            // Use the CSS variable for "leave" text color (red)
-            exceedWarning = ` <strong style="color: var(--status-leave-text);">(Exceeded by ${ex_m}m ${ex_s}s)</strong>`;
-            
-            // Make the whole status box flash red if exceeded
-            displayDiv.className = `status-message visible status-leave`;
-          }
-          // --- END NEW ---
+    let warningMsg = "";
+    
+    // 1. Break Exceed Logic
+    let plannedSeconds = 0;
+    if (statusInfo.status === 'On First Break' || statusInfo.status === 'On Last Break') plannedSeconds = PLANNED_BREAK_SECONDS;
+    else if (statusInfo.status === 'On Lunch') plannedSeconds = PLANNED_LUNCH_SECONDS;
+    
+    if (plannedSeconds > 0 && diffSec > plannedSeconds) {
+      const ex_m = Math.floor((diffSec - plannedSeconds) / 60);
+      const ex_s = (diffSec - plannedSeconds) % 60;
+      warningMsg = ` <strong style="color: var(--status-leave-text);">(Exceeded by ${ex_m}m ${ex_s}s)</strong>`;
+      displayDiv.className = `status-message visible status-leave`; // Red flash
+    } 
+    // 2. *** PHASE 8: Overtime Logic ***
+    else if (statusInfo.status === 'Logged In' && shiftEnd && now > shiftEnd) {
+      const otMs = now.getTime() - shiftEnd.getTime();
+      const otSec = Math.floor(otMs / 1000);
+      const otH = Math.floor(otSec / 3600);
+      const otM = Math.floor((otSec % 3600) / 60);
+      
+      warningMsg = ` <strong style="color: #d97706;">(OVERTIME: ${otH}h ${otM}m)</strong>`;
+      // Override class to indicate overtime (Yellow/Orange)
+      displayDiv.className = `status-message visible status-pending`; 
+    } 
+    else {
+      // Normal state
+      displayDiv.className = `status-message visible status-${statusClass}`;
+    }
 
-          displayDiv.innerHTML = `
-            <strong>${statusInfo.status}</strong> 
-            (since ${formatTime(statusInfo.time)} - ${elapsedStr})${exceedWarning}
-          `;
-        };
+    displayDiv.innerHTML = `
+      <strong>${statusInfo.status}</strong> 
+      (since ${formatTime(statusInfo.time)} - ${elapsedStr})${warningMsg}
+    `;
+  };
 
-        updateText(); // Run once immediately
-        statusTimer = setInterval(updateText, 1000); // Update every second
+  updateText(); 
+  statusTimer = setInterval(updateText, 1000);
 
-        // --- Button State Logic (continued) ---
-        if (statusInfo.status === 'Logged In') {
-          // 2. Logged In State: Enable everything *except* Login
-          setAllPunchButtonsDisabled(false);
-          document.querySelector('button[onclick="punch(\'Login\')"]').disabled = true;
-        
-        } else if (statusInfo.status.startsWith('On ')) {
-          // 3. "On Break/Lunch/Coaching" State: Only enable the matching "Out" button
-          setAllPunchButtonsDisabled(true); // All are disabled...
-          
-          const statusType = statusInfo.status.replace('On ', ''); // "First Break", "Lunch", "Coaching"
-          
-          // Find the matching "Out" button
-          let matchingButton = null;
-          if (statusType === 'First Break') {
-            matchingButton = document.querySelector('button[onclick="punch(\'First Break Out\')"]');
-          } else if (statusType === 'Lunch') {
-            matchingButton = document.querySelector('button[onclick="punch(\'Lunch Out\')"]');
-          } else if (statusType === 'Last Break') {
-            matchingButton = document.querySelector('button[onclick="punch(\'Last Break Out\')"]');
-          } else if (statusType === 'Coaching') {
-            matchingButton = document.querySelector('button[onclick="punch(\'Coaching Out\')"]');
-          } else if (statusType === 'Meeting') {
-            matchingButton = document.querySelector('button[onclick="punch(\'Meeting Out\')"]');
-          } else if (statusType === 'Personal') {
-            matchingButton = document.querySelector('button[onclick="punch(\'Personal Out\')"]');
-          }
-
-          if (matchingButton) {
-            matchingButton.disabled = false; // ...except the one that gets you out.
-          }
-        }
-      }
-
-      /**
-       * Updates the new #current-status-display with live elapsed time.
-       */
-      function updateCurrentStatus(statusInfo) {
-        if (statusTimer) {
-          clearInterval(statusTimer); // Stop any existing timer
-        }
-
-        const displayDiv = document.getElementById('current-status-display');
-        if (!statusInfo || !statusInfo.status || statusInfo.status === 'Logged Out') {
-          displayDiv.style.visibility = 'hidden';
-          return;
-        }
-
-        const punchTime = new Date(statusInfo.time);
-        
-        const updateText = () => {
-          const now = new Date();
-          const diffMs = now.getTime() - punchTime.getTime();
-          const diffSec = Math.floor(diffMs / 1000);
-          
-          let elapsedStr = '';
-          if (diffSec < 60) {
-            elapsedStr = `${diffSec}s ago`;
-          } else if (diffSec < 3600) {
-            elapsedStr = `${Math.floor(diffSec / 60)}m ${diffSec % 60}s ago`;
-          } else {
-            const h = Math.floor(diffSec / 3600);
-            const m = Math.floor((diffSec % 3600) / 60);
-            elapsedStr = `${h}h ${m}m ago`;
-          }
-
-          let statusClass = getStatusClass(statusInfo.status);
-          // Use status-login style for "Logged In"
-          if (statusInfo.status === 'Logged In') statusClass = 'Logged-In'; 
-
-          displayDiv.className = `status-message visible status-${statusClass}`;
-          displayDiv.style.visibility = 'visible';
-          displayDiv.innerHTML = `
-            <strong>${statusInfo.status}</strong> 
-            (since ${formatTime(statusInfo.time)} - ${elapsedStr})
-          `;
-        };
-
-        updateText(); // Run once immediately
-        statusTimer = setInterval(updateText, 1000); // Update every second
-      }
+  // Button Logic (Unchanged)
+  if (statusInfo.status === 'Logged In') {
+    setAllPunchButtonsDisabled(false);
+    document.querySelector('button[onclick="punch(\'Login\')"]').disabled = true;
+  } else if (statusInfo.status.startsWith('On ')) {
+    setAllPunchButtonsDisabled(true);
+    const type = statusInfo.status.replace('On ', '');
+    const map = {
+      'First Break': 'First Break Out', 'Lunch': 'Lunch Out', 'Last Break': 'Last Break Out',
+      'Coaching': 'Coaching Out', 'Meeting': 'Meeting Out', 'Personal': 'Personal Out'
+    };
+    if (map[type]) {
+       const btn = document.querySelector(`button[onclick="punch('${map[type]}')"]`);
+       if(btn) btn.disabled = false;
+    }
+  }
+}
       
       // REPLACE this function in your <script> tag
 function getStatusClass(status) {
@@ -7211,6 +7223,132 @@ function runMigrationTool() {
     setStatus('migration-status', 'success', msg);
   }).withFailureHandler(err => setStatus('migration-status', 'error', err.message))
   ._MIGRATE_OLD_DB_TO_NEW();
+}
+
+
+// --- OVERTIME FUNCTIONS ---
+
+function loadOvertimeTab() {
+  // 1. Setup User Info
+  document.getElementById('ot-req-date').valueAsDate = new Date();
+  
+  // 2. Show Manager Section if Permitted
+  if (selfRole === 'admin' || selfRole === 'superadmin' || selfRole === 'manager') {
+    document.getElementById('ot-manager-section').style.display = 'block';
+    document.getElementById('ot-pre-date').valueAsDate = new Date();
+    populateAdminDropdown(allUsersList, selfUserName, 'ot-employee-select', 'Select Employee');
+  } else {
+    document.getElementById('ot-manager-section').style.display = 'none';
+  }
+
+  // 3. Load List
+  loadOvertimeRequests();
+}
+
+function submitOtRequest() {
+  const data = {
+    date: document.getElementById('ot-req-date').value,
+    hours: document.getElementById('ot-req-hours').value,
+    reason: document.getElementById('ot-req-reason').value
+  };
+  
+  if (!data.date || !data.hours || !data.reason) {
+    setStatus('ot-status', 'error', 'All fields are required.');
+    return;
+  }
+
+  setStatus('ot-status', 'processing', 'Submitting...');
+  google.script.run
+    .withSuccessHandler(msg => {
+      setStatus('ot-status', 'success', msg);
+      loadOvertimeRequests();
+    })
+    .withFailureHandler(err => setStatus('ot-status', 'error', err.message))
+    .webSubmitOvertimeRequest(data);
+}
+
+function submitPreApproval() {
+  const data = {
+    email: document.getElementById('ot-employee-select').value,
+    date: document.getElementById('ot-pre-date').value,
+    hours: document.getElementById('ot-pre-hours').value
+  };
+  const comment = document.getElementById('ot-pre-comment').value;
+
+  if (!data.email || !data.date || !data.hours) {
+    alert("Please fill in Employee, Date, and Hours.");
+    return;
+  }
+
+  google.script.run
+    .withSuccessHandler(msg => {
+      alert(msg);
+      loadOvertimeRequests();
+    })
+    .withFailureHandler(err => alert("Error: " + err.message))
+    .webActionOvertime(null, 'Pre-Approve', comment, data);
+}
+
+function loadOvertimeRequests() {
+  const filter = document.getElementById('ot-filter-status').value;
+  const list = document.getElementById('ot-request-list');
+  list.innerHTML = '<p class="text-color-secondary">Loading...</p>';
+
+  google.script.run
+    .withSuccessHandler(reqs => {
+      if (reqs.length === 0) {
+        list.innerHTML = '<p class="text-color-secondary">No requests found.</p>';
+        return;
+      }
+      
+      let html = '';
+      reqs.forEach(r => {
+        let statusBadge = `status-pending`;
+        if (r.status === 'Approved') statusBadge = 'status-approved';
+        if (r.status === 'Denied') statusBadge = 'status-denied';
+
+        // Manager Actions
+        let actions = '';
+        if (r.status === 'Pending' && (selfRole === 'admin' || selfRole === 'manager' || selfRole === 'superadmin')) {
+          actions = `
+            <div style="margin-top: 10px;">
+              <button class="approve-btn" onclick="actionOvertime('${r.id}', 'Approved')">Approve</button>
+              <button class="deny-btn" onclick="actionOvertime('${r.id}', 'Denied')">Deny</button>
+            </div>
+          `;
+        }
+
+        html += `
+          <div class="request-list-item">
+            <div class="item-details">
+              <h4>${r.name} <span class="text-color-secondary">(${r.hours} hrs)</span></h4>
+              <p><strong>Date:</strong> ${r.date}</p>
+              <p><strong>Planned Shift End:</strong> ${r.plannedEnd}</p>
+              <p><strong>Reason:</strong> ${r.reason}</p>
+              ${r.comment ? `<p class="text-color-secondary"><em>Note: ${r.comment}</em></p>` : ''}
+            </div>
+            <div class="item-actions">
+              <span class="status-badge ${statusBadge}">${r.status}</span>
+              ${actions}
+            </div>
+          </div>
+        `;
+      });
+      list.innerHTML = html;
+    })
+    .withFailureHandler(err => list.innerHTML = `<p class="error">${err.message}</p>`)
+    .webGetOvertimeRequests(filter);
+}
+
+function actionOvertime(id, action) {
+  const comment = prompt(`Reason for ${action}:`) || "";
+  google.script.run
+    .withSuccessHandler(msg => {
+      alert(msg);
+      loadOvertimeRequests();
+    })
+    .withFailureHandler(err => alert(err.message))
+    .webActionOvertime(id, action, comment, null);
 }
 
 
