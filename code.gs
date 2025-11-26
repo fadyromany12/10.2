@@ -5534,7 +5534,7 @@ function webGetPendingDataChanges() {
  * Creates folders for new users.
  */
 function _MIGRATE_OLD_DB_TO_NEW() {
-  const ss = SpreadsheetApp.openById(1FotLFASWuFinDnvpyLTsyO51OpJeKWtuG31VFje3Oik);
+  const ss = SpreadsheetApp.openById(SPREADSHEET_ID);
   const oldDbSheet = ss.getSheetByName("Data Base");
   const coreSheet = getOrCreateSheet(ss, SHEET_NAMES.employeesCore);
   const piiSheet = getOrCreateSheet(ss, SHEET_NAMES.employeesPII);
