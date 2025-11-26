@@ -2316,8 +2316,7 @@ body.dark-mode .dropdown-option.selected {
   </div>
 
   <br>
-  <button class="btn-secondary" onclick="runMigrationTool()">Run Data Base Migration Tool</button>
-  <div id="migration-status" class="status-message"></div>
+  
 
 </div>
 
@@ -7216,15 +7215,6 @@ function submitHrOffboarding() {
   .webOffboardEmployee({email, exitDate: date, reason});
 }
 
-function runMigrationTool() {
-  if (!confirm("Run full database migration? This creates accounts for everyone in the old 'Data Base' sheet.")) return;
-  setStatus('migration-status', 'processing', 'Migrating data... This make take a minute.');
-  
-  google.script.run.withSuccessHandler(msg => {
-    setStatus('migration-status', 'success', msg);
-  }).withFailureHandler(err => setStatus('migration-status', 'error', err.message))
-  ._MIGRATE_OLD_DB_TO_NEW();
-}
 
 
 // --- OVERTIME FUNCTIONS ---
