@@ -1404,6 +1404,10 @@ body.dark-mode .dropdown-option.selected {
             <svg class="nav-icon" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"></path><circle cx="9" cy="7" r="4"></circle><path d="M23 21v-2a4 4 0 0 0-3-3.87"></path><path d="M16 3.13a4 4 0 0 1 0 7.75"></path></svg>
             <span class="nav-button-text">Recruitment</span>
           </button>
+          <button id="hr-admin-tab-button" class="tab-button" onclick="showTab('hr-admin')">
+            <span class="nav-icon">👥</span>
+            <span class="nav-button-text">HR Admin</span>
+          </button>
         </div>
 
       </nav>
@@ -1427,7 +1431,6 @@ body.dark-mode .dropdown-option.selected {
 
           <div id="agent-info" class="info-card">Loading user info...</div> 
           <div id="admin-panel" class="info-card" style="display: none; text-align: left; overflow: visible;">
-  <label style="font-weight: 500; margin-bottom: 5px; display:block;">Punch For:</label>
   <div id="agent-select-container"></div>
 </div>
           <div id="project-selector-container" class="info-card" style="text-align: left; margin-bottom: 20px; background-color: var(--input-bg);">
@@ -2215,6 +2218,104 @@ body.dark-mode .dropdown-option.selected {
   
   <div id="finance-status" class="status-message"></div>
 </div>
+
+        <!-- ================================== -->
+        <!--  TAB 16: Finance ADMIN PANEL -->
+        <!-- ================================== -->
+
+<div id="hr-admin-panel" class="tab-panel">
+  <h2>HR Administration</h2>
+
+  <div class="info-card" style="text-align: left; background-color: var(--status-info-bg); border-color: var(--status-info-text);">
+    <h3 style="margin-top: 0; font-size: 1rem; color: var(--status-info-text);">Pending Data Change Requests</h3>
+    <div id="hr-data-requests-list" style="max-height: 150px; overflow-y: auto; margin-top: 10px;">
+      <p class="text-color-secondary">Loading requests...</p>
+    </div>
+  </div>
+
+  <hr class="section-divider">
+
+  <div class="form-container">
+    <h3>Employee PII Editor</h3>
+    <div class="form-group" style="display: flex; gap: 10px;">
+      <input type="text" id="hr-pii-search" placeholder="Search by Name or Email..." style="flex: 1;">
+      <button class="btn-primary" onclick="searchEmployeePII()">Search</button>
+    </div>
+    <div id="hr-pii-search-status" class="status-message"></div>
+
+    <div id="hr-pii-form-container" style="display: none; margin-top: 20px; border-top: 1px solid var(--border-color); padding-top: 20px;">
+      <input type="hidden" id="hr-pii-empid">
+      <h4 id="hr-pii-header" style="color: var(--konecta-blue);"></h4>
+      
+      <div class="form-row">
+        <div class="form-group"><label>National ID</label><input type="text" id="hr-pii-natid"></div>
+        <div class="form-group"><label>Passport No.</label><input type="text" id="hr-pii-passport"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Social Insurance</label><input type="text" id="hr-pii-social"></div>
+        <div class="form-group"><label>IBAN</label><input type="text" id="hr-pii-iban"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Personal Email</label><input type="email" id="hr-pii-pemail"></div>
+        <div class="form-group"><label>Phone</label><input type="text" id="hr-pii-phone"></div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Address</label><input type="text" id="hr-pii-address"></div>
+        <div class="form-group"><label>Marital Status</label>
+          <select id="hr-pii-marital">
+            <option value="Single">Single</option>
+            <option value="Married">Married</option>
+            <option value="Divorced">Divorced</option>
+          </select>
+        </div>
+      </div>
+      <div class="form-row">
+        <div class="form-group"><label>Basic Salary</label><input type="number" id="hr-pii-basic"></div>
+        <div class="form-group"><label>Variable Pay</label><input type="number" id="hr-pii-variable"></div>
+      </div>
+
+      <button class="btn-primary" onclick="saveEmployeePII()">Save Changes</button>
+    </div>
+  </div>
+
+  <hr class="section-divider">
+
+  <div class="form-container">
+    <h3>Leave Balance Adjustment</h3>
+    <div class="form-group">
+      <label>Select User</label>
+      <div id="hr-balance-user-select-container"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>Type</label><select id="hr-balance-type"><option value="Annual">Annual</option><option value="Sick">Sick</option><option value="Casual">Casual</option></select></div>
+      <div class="form-group"><label>Amount (+/-)</label><input type="number" id="hr-balance-amount" step="0.5"></div>
+    </div>
+    <div class="form-group"><label>Reason</label><input type="text" id="hr-balance-reason"></div>
+    <button class="btn-primary" style="background-color: var(--konecta-yellow); color: #000;" onclick="submitHrBalanceAdjustment()">Adjust Balance</button>
+    <div id="hr-balance-status" class="status-message"></div>
+  </div>
+
+  <br>
+
+  <div style="border: 1px solid #e53e3e; padding: 20px; border-radius: 8px; background-color: #fff5f5;">
+    <h3 style="color: #c53030; margin-top:0;">⚠ Offboarding / Termination</h3>
+    <div class="form-row">
+      <div class="form-group">
+        <label>Select Employee</label>
+        <div id="hr-offboard-user-select-container"></div>
+      </div>
+      <div class="form-group"><label>Exit Date</label><input type="date" id="hr-offboard-date"></div>
+    </div>
+    <div class="form-group"><label>Reason</label><select id="hr-offboard-reason"><option>Resignation</option><option>Termination</option></select></div>
+    <button class="btn-danger" onclick="submitHrOffboarding()">Process Exit</button>
+    <div id="hr-offboard-status" class="status-message"></div>
+  </div>
+
+  <br>
+  <button class="btn-secondary" onclick="runMigrationTool()">Run Data Base Migration Tool</button>
+  <div id="migration-status" class="status-message"></div>
+
+</div>
         
       </main> <!-- End #app-content -->
       
@@ -2343,7 +2444,7 @@ body.dark-mode .dropdown-option.selected {
         });
       }
       // === TAB SWITCHING FUNCTION ===
-      function showTab(tabName) {
+function showTab(tabName) {
   // Hide all panels
   document.querySelectorAll('.tab-panel').forEach(panel => {
     panel.style.display = 'none';
@@ -2367,18 +2468,15 @@ body.dark-mode .dropdown-option.selected {
   if (button) button.classList.add('active');
 
   // --- LAZY LOAD DROPDOWNS & DATA ---
-  // Only populate if the user list is loaded
   if (allUsersList && allUsersList.length > 0) {
     
     if (tabName === 'admin-tools') {
-      // Fix: Admin Tools Dropdowns
       populateAdminDropdown(allUsersList, selfUserName, 'manual-punch-user', 'Select User');
       populateAdminDropdown(allUsersList, selfUserName, 'balance-user-select', 'Select User');
       populateAdminDropdown(allUsersList, selfUserName, 'admin-leave-user', 'Select User');
       populateAdminDropdown(allUsersList, selfUserName, 'offboard-user-select', 'Select Employee');
     
     } else if (tabName === 'reporting-line') {
-      // Fix: Reporting Line Dropdowns
       populateAdminDropdown(allUsersList, selfUserName, 'reporting-line-user', 'Select User to Move');
       populateAdminDropdown(allUsersList, selfUserName, 'reporting-line-supervisor', 'Select New Supervisor');
       populateAdminDropdown(allUsersList, selfUserName, 'movement-history-user', 'Select User');
@@ -2386,19 +2484,20 @@ body.dark-mode .dropdown-option.selected {
       document.getElementById('movement-history-list').innerHTML = '<p class="text-color-secondary">Select a user to view their movement history.</p>';
     
     } else if (tabName === 'leave-approval') {
-      // Fix: Leave Approval Filter
       populateAdminDropdown(allUsersList, selfUserName, 'leave-report-user', 'Filter by User (Optional)');
       loadLeaveReport();
     
     } else if (tabName === 'history-report') {
-      // Fix: History Multi-Select
       populateAdminDropdown(allUsersList, selfUserName, 'history', 'Select Users');
-      
-      // *** ADD THIS LINE TO UNHIDE THE DROPDOWN ***
-      document.getElementById('history-user-select-container').style.display = 'block';
+      // Ensure container is visible (Fix for "History Report not showing user select")
+      const histContainer = document.getElementById('history-user-select-container');
+      if(histContainer) histContainer.style.display = 'block';
     
     } else if (tabName === 'performance') {
       loadPerformanceTab();
+    
+    } else if (tabName === 'hr-admin') {
+      loadHrAdmin(); // New Phase 7 Function
     }
   }
 
@@ -2424,8 +2523,7 @@ body.dark-mode .dropdown-option.selected {
   } else if (tabName === 'recruitment') {
     loadRecruitmentAdmin();
   }
-}
-      
+}      
       // --- Refresh User Info ---
       function refreshCurrentData() {
         const btn = document.getElementById('header-refresh-button');
@@ -2468,7 +2566,7 @@ body.dark-mode .dropdown-option.selected {
           .getUserInfo();
       }
 
-      function populateUserInfo(user) {
+function populateUserInfo(user) {
   const infoDiv = document.getElementById('agent-info');
   if (!user || !user.name) {
     infoDiv.innerHTML = "Your email is not registered.";
@@ -2508,13 +2606,13 @@ body.dark-mode .dropdown-option.selected {
 
   // 1. Agent Tools (Visible to Everyone)
   setDisplay('my-schedule-tab-button', true);
-  setDisplay('history-report-tab-button', true); // FIX: Always show History
-  setDisplay('coaching-tab-button', true);       // FIX: Always show Coaching
+  setDisplay('history-report-tab-button', true);
+  setDisplay('coaching-tab-button', true);
   
   // 2. Management Tools (RBAC)
   setDisplay('dashboard-tab-button', can('VIEW_FULL_DASHBOARD'));
   setDisplay('leave-approval-tab-button', can('APPROVE_LEAVE'));
-  setDisplay('reporting-line-tab-button', can('MANAGE_HIERARCHY')); // FIX: Show based on Permission
+  setDisplay('reporting-line-tab-button', can('MANAGE_HIERARCHY'));
 
   // 3. Admin Tools (RBAC)
   setDisplay('finance-admin-tab-button', can('MANAGE_FINANCE'));
@@ -2525,6 +2623,9 @@ body.dark-mode .dropdown-option.selected {
   setDisplay('registration-admin-tab-button', can('HIRE_EMPLOYEE'));
   setDisplay('announcements-admin-tab-button', can('MANAGE_ANNOUNCEMENTS'));
   setDisplay('recruitment-tab-button', can('MANAGE_RECRUITMENT'));
+  
+  // 4. HR Admin (New Phase 7)
+  setDisplay('hr-admin-tab-button', can('OFFBOARD_EMPLOYEE')); // Visible to HR/Superadmin
   
   // Specific Logic for Panels
   if (can('PUNCH_OTHERS')) {
@@ -2616,7 +2717,7 @@ body.dark-mode .dropdown-option.selected {
       
       // Replaces existing populateAdminDropdown
 function populateAdminDropdown(users, selfName, dropdownId, selfText) {
-  // Map old ID to new Container ID
+  // Map Dropdown IDs to their Container IDs
   const map = {
     'agent-select': 'agent-select-container',
     'schedule-agent-select': 'schedule-agent-select-container',
@@ -2629,38 +2730,30 @@ function populateAdminDropdown(users, selfName, dropdownId, selfText) {
     'coaching-agent-select': 'coaching-agent-select-container',
     'leave-report-user': 'leave-report-user-container',
     'perf-employee-select': 'perf-employee-select-container',
-    'offboard-user-select': 'offboard-user-select-container'
+    'offboard-user-select': 'offboard-user-select-container',
+    
+    // --- NEW HR ADMIN MAPPINGS (Add these lines) ---
+    'hr-balance-user-select': 'hr-balance-user-select-container',
+    'hr-offboard-user-select': 'hr-offboard-user-select-container'
   };
 
   // Special Handling for History (Multi-Select)
   if (dropdownId === 'history') {
       renderGlobalUserSelector('history-user-select-wrapper', users, 'Select Users', true, (vals) => {
-          // Store in global variable for compatibility with loadHistoryReport
-          // Or better: Attach value to container
           document.getElementById('history-user-select-wrapper').dataset.value = JSON.stringify(vals);
       });
       return;
   }
 
   const containerId = map[dropdownId];
-  if (!containerId) return; // Skip if no mapping found
+  if (!containerId) return; 
 
-  // Inject "Me" option for Punch
   let userList = [...users];
-  if (dropdownId === 'agent-select') {
-      const selfUser = users.find(u => u.name === selfName);
-      if (selfUser) {
-          // Ensure "Myself" is at the top or handled. 
-          // The sorter will handle it, or we can pre-select.
-      }
-  }
-
+  
   renderGlobalUserSelector(containerId, userList, selfText, false, (vals) => {
       const val = vals[0] || '';
       
-      // HIDDEN INPUT STRATEGY:
-      // Check if hidden input exists, if not create it.
-      // This ensures document.getElementById('old-id').value still works!
+      // Create or update hidden input
       let hidden = document.getElementById(dropdownId);
       if (!hidden) {
           hidden = document.createElement('input');
@@ -6975,6 +7068,150 @@ document.addEventListener('click', (e) => {
         document.querySelectorAll('.multi-select-dropdown').forEach(d => d.classList.remove('open'));
     }
 });
+
+
+// --- HR ADMIN FUNCTIONS ---
+
+function loadHrAdmin() {
+  // 1. Load Pending Requests
+  const reqList = document.getElementById('hr-data-requests-list');
+  reqList.innerHTML = '<p class="text-color-secondary">Loading...</p>';
+  google.script.run.withSuccessHandler(reqs => {
+    if (reqs.length === 0) {
+      reqList.innerHTML = '<p class="text-color-secondary">No pending data changes.</p>';
+    } else {
+      let html = '<ul style="padding-left: 20px; margin: 0;">';
+      reqs.forEach(r => {
+        html += `<li style="margin-bottom: 5px; font-size: 0.9rem;">
+          <strong>${r.date}:</strong> ${r.user} (${r.email}) - <span style="color: var(--konecta-blue);">${r.details}</span>
+        </li>`;
+      });
+      html += '</ul>';
+      reqList.innerHTML = html;
+    }
+  }).webGetPendingDataChanges();
+
+  // 2. Populate Dropdowns (Balance & Offboard)
+  // Reuse the global list
+  if (allUsersList.length > 0) {
+    populateAdminDropdown(allUsersList, selfUserName, 'hr-balance-user-select', 'Select User');
+    populateAdminDropdown(allUsersList, selfUserName, 'hr-offboard-user-select', 'Select Employee');
+  }
+}
+
+function searchEmployeePII() {
+  const query = document.getElementById('hr-pii-search').value;
+  if (!query) return;
+
+  setStatus('hr-pii-search-status', 'processing', 'Searching...');
+  document.getElementById('hr-pii-form-container').style.display = 'none';
+
+  google.script.run
+    .withSuccessHandler(data => {
+      setStatus('hr-pii-search-status', 'success', 'User found.');
+      const c = data.core;
+      const p = data.pii;
+
+      document.getElementById('hr-pii-form-container').style.display = 'block';
+      document.getElementById('hr-pii-header').innerText = `Editing: ${c.name} (${c.empID})`;
+      document.getElementById('hr-pii-empid').value = c.empID;
+
+      // Populate fields
+      document.getElementById('hr-pii-natid').value = p.NationalID || '';
+      document.getElementById('hr-pii-passport').value = p.PassportNumber || '';
+      document.getElementById('hr-pii-social').value = p.SocialInsuranceNumber || '';
+      document.getElementById('hr-pii-iban').value = p.IBAN || '';
+      document.getElementById('hr-pii-pemail').value = p.PersonalEmail || '';
+      document.getElementById('hr-pii-phone').value = p.Phone || '';
+      document.getElementById('hr-pii-address').value = p.Address || '';
+      document.getElementById('hr-pii-marital').value = p.MaritalStatus || 'Single';
+      document.getElementById('hr-pii-basic').value = p.BasicSalary || 0;
+      document.getElementById('hr-pii-variable').value = p.VariablePay || 0;
+    })
+    .withFailureHandler(err => {
+      setStatus('hr-pii-search-status', 'error', err.message);
+    })
+    .webSearchEmployeePII(query);
+}
+
+function saveEmployeePII() {
+  const empID = document.getElementById('hr-pii-empid').value;
+  const formData = {
+    NationalID: document.getElementById('hr-pii-natid').value,
+    PassportNumber: document.getElementById('hr-pii-passport').value,
+    SocialInsuranceNumber: document.getElementById('hr-pii-social').value,
+    IBAN: document.getElementById('hr-pii-iban').value,
+    PersonalEmail: document.getElementById('hr-pii-pemail').value,
+    Phone: document.getElementById('hr-pii-phone').value,
+    Address: document.getElementById('hr-pii-address').value,
+    MaritalStatus: document.getElementById('hr-pii-marital').value,
+    BasicSalary: document.getElementById('hr-pii-basic').value,
+    VariablePay: document.getElementById('hr-pii-variable').value
+  };
+
+  setStatus('hr-pii-search-status', 'processing', 'Saving PII...');
+  
+  google.script.run
+    .withSuccessHandler(msg => {
+      setStatus('hr-pii-search-status', 'success', msg);
+      document.getElementById('hr-pii-form-container').style.display = 'none';
+      document.getElementById('hr-pii-search').value = '';
+      loadHrAdmin(); // Refresh requests list if needed
+    })
+    .withFailureHandler(err => setStatus('hr-pii-search-status', 'error', err.message))
+    .webUpdateEmployeePII(empID, formData);
+}
+
+// Wrapper for Balance Adjustment (using HR tab IDs)
+function submitHrBalanceAdjustment() {
+  // Temporarily map HR IDs to the backend function logic
+  const userEmail = document.getElementById('hr-balance-user-select').value;
+  const type = document.getElementById('hr-balance-type').value;
+  const amount = parseFloat(document.getElementById('hr-balance-amount').value);
+  const reason = document.getElementById('hr-balance-reason').value;
+
+  if (!userEmail || !amount || !reason) {
+    setStatus('hr-balance-status', 'error', 'All fields are required.');
+    return;
+  }
+
+  setStatus('hr-balance-status', 'processing', 'Updating balance...');
+  google.script.run.withSuccessHandler(msg => {
+    setStatus('hr-balance-status', 'success', msg);
+    document.getElementById('hr-balance-amount').value = '';
+    document.getElementById('hr-balance-reason').value = '';
+  }).withFailureHandler(err => setStatus('hr-balance-status', 'error', err.message))
+  .webAdjustLeaveBalance(userEmail, type, amount, reason);
+}
+
+// Wrapper for Offboarding (using HR tab IDs)
+function submitHrOffboarding() {
+  const email = document.getElementById('hr-offboard-user-select').value;
+  const date = document.getElementById('hr-offboard-date').value;
+  const reason = document.getElementById('hr-offboard-reason').value;
+
+  if (!email || !date) {
+    setStatus('hr-offboard-status', 'error', 'Required fields missing.');
+    return;
+  }
+  if (!confirm("Confirm offboarding for " + email + "?")) return;
+
+  setStatus('hr-offboard-status', 'processing', 'Processing...');
+  google.script.run.withSuccessHandler(msg => {
+    setStatus('hr-offboard-status', 'success', msg);
+  }).withFailureHandler(err => setStatus('hr-offboard-status', 'error', err.message))
+  .webOffboardEmployee({email, exitDate: date, reason});
+}
+
+function runMigrationTool() {
+  if (!confirm("Run full database migration? This creates accounts for everyone in the old 'Data Base' sheet.")) return;
+  setStatus('migration-status', 'processing', 'Migrating data... This make take a minute.');
+  
+  google.script.run.withSuccessHandler(msg => {
+    setStatus('migration-status', 'success', msg);
+  }).withFailureHandler(err => setStatus('migration-status', 'error', err.message))
+  ._MIGRATE_OLD_DB_TO_NEW();
+}
 
 
       // Initialize
