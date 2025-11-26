@@ -5402,3 +5402,210 @@ function _MASTER_DB_FIXER() {
   
   Logger.log("Master DB Fix Complete.");
 }
+
+// ==========================================
+// === PHASE 7: HR ADMIN & PII TOOLS ===
+// ==========================================
+
+/**
+ * ADMIN: Search for an employee to edit their PII.
+ * Returns Core data merged with PII data.
+ */
+function webSearchEmployeePII(query) {
+  const { userEmail, userData, ss } = getAuthorizedContext('OFFBOARD_EMPLOYEE'); // Reusing a high-level HR permission
+  
+  const lowerQuery = query.toLowerCase().trim();
+  const targetUser = userData.userList.find(u => 
+    u.email.includes(lowerQuery) || u.name.toLowerCase().includes(lowerQuery)
+  );
+
+  if (!targetUser) throw new Error("User not found.");
+
+  // Fetch PII Data
+  const piiSheet = getOrCreateSheet(ss, SHEET_NAMES.employeesPII);
+  const piiData = piiSheet.getDataRange().getValues();
+  const piiHeaders = piiData[0];
+  
+  let piiRow = {};
+  const empIdIdx = piiHeaders.indexOf("EmployeeID");
+  
+  for (let i = 1; i < piiData.length; i++) {
+    if (piiData[i][empIdIdx] === targetUser.empID) {
+      // Map all headers to the row values
+      piiHeaders.forEach((header, index) => {
+        let value = piiData[i][index];
+        // Format dates
+        if (value instanceof Date) value = convertDateToString(value).split('T')[0];
+        piiRow[header] = value;
+      });
+      break;
+    }
+  }
+
+  return {
+    core: targetUser,
+    pii: piiRow
+  };
+}
+
+/**
+ * ADMIN: Update PII fields for an employee.
+ */
+function webUpdateEmployeePII(empID, formData) {
+  const { userEmail: adminEmail, ss } = getAuthorizedContext('OFFBOARD_EMPLOYEE');
+  
+  const piiSheet = getOrCreateSheet(ss, SHEET_NAMES.employeesPII);
+  const data = piiSheet.getDataRange().getValues();
+  const headers = data[0];
+  
+  let rowIndex = -1;
+  // Find row by EmployeeID (Col A)
+  for (let i = 1; i < data.length; i++) {
+    if (data[i][0] === empID) {
+      rowIndex = i + 1;
+      break;
+    }
+  }
+
+  if (rowIndex === -1) throw new Error("Employee PII record not found.");
+
+  // Update fields dynamically based on formData keys matching headers
+  // We only allow specific editable fields for safety
+  const allowedFields = [
+    "NationalID", "IBAN", "PassportNumber", "SocialInsuranceNumber", 
+    "Address", "Phone", "PersonalEmail", "MaritalStatus", 
+    "EmergencyContact", "EmergencyRelation", "BasicSalary", "VariablePay"
+  ];
+
+  const updates = [];
+
+  for (const [key, value] of Object.entries(formData)) {
+    if (allowedFields.includes(key)) {
+      const colIndex = headers.indexOf(key);
+      if (colIndex > -1) {
+        piiSheet.getRange(rowIndex, colIndex + 1).setValue(value);
+        updates.push(`${key}: ${value}`);
+      }
+    }
+  }
+
+  // Log changes
+  const logsSheet = getOrCreateSheet(ss, SHEET_NAMES.logs);
+  logsSheet.appendRow([
+    new Date(),
+    `ID: ${empID}`,
+    adminEmail,
+    "Admin PII Update",
+    `Updated: ${updates.join(', ')}`
+  ]);
+
+  return "Employee data updated successfully.";
+}
+
+/**
+ * ADMIN: Get pending data change requests (from Logs).
+ */
+function webGetPendingDataChanges() {
+  const { ss } = getAuthorizedContext('OFFBOARD_EMPLOYEE');
+  const logsSheet = getOrCreateSheet(ss, SHEET_NAMES.logs);
+  const data = logsSheet.getDataRange().getValues();
+  const requests = [];
+
+  // Loop backwards to see newest first
+  for (let i = data.length - 1; i > 0; i--) {
+    const row = data[i];
+    // Look for "Data Change Request" or "Profile Change Request"
+    if (row[3] === "Data Change Request" || row[3] === "Profile Change Request") {
+      requests.push({
+        date: convertDateToString(new Date(row[0])),
+        user: row[1],
+        email: row[2],
+        details: row[4]
+      });
+    }
+    // Limit to last 20 requests to keep it snappy
+    if (requests.length >= 20) break;
+  }
+  return requests;
+}
+
+/**
+ * MIGRATION: Import users from 'Data Base' to 'Employees_Core' and 'Employees_PII'.
+ * Creates folders for new users.
+ */
+function _MIGRATE_OLD_DB_TO_NEW() {
+  const ss = SpreadsheetApp.openById(1FotLFASWuFinDnvpyLTsyO51OpJeKWtuG31VFje3Oik);
+  const oldDbSheet = ss.getSheetByName("Data Base");
+  const coreSheet = getOrCreateSheet(ss, SHEET_NAMES.employeesCore);
+  const piiSheet = getOrCreateSheet(ss, SHEET_NAMES.employeesPII);
+
+  if (!oldDbSheet) throw new Error("Old 'Data Base' sheet not found.");
+
+  const oldData = oldDbSheet.getDataRange().getValues(); 
+  // Old Headers: Name(0), Email(1), Role(2), Annual(3), Sick(4), Casual(5), SupEmail(6), Status(7), HiringDate(8)
+
+  const coreData = coreSheet.getDataRange().getValues();
+  const existingEmails = new Set();
+  for (let i = 1; i < coreData.length; i++) {
+    existingEmails.add(coreData[i][2].toLowerCase()); // Col 2 = Email
+  }
+
+  let count = 0;
+  const rootFolder = DriveApp.getFoldersByName("KOMPASS_HR_Files").hasNext() 
+    ? DriveApp.getFoldersByName("KOMPASS_HR_Files").next() 
+    : DriveApp.createFolder("KOMPASS_HR_Files");
+  
+  let empFilesFolder;
+  if (rootFolder.getFoldersByName("Employee_Files").hasNext()) {
+    empFilesFolder = rootFolder.getFoldersByName("Employee_Files").next();
+  } else {
+    empFilesFolder = rootFolder.createFolder("Employee_Files");
+  }
+
+  for (let i = 1; i < oldData.length; i++) {
+    const row = oldData[i];
+    const email = (row[1] || "").toString().toLowerCase().trim();
+    const name = row[0];
+
+    if (!email || existingEmails.has(email)) continue;
+
+    // 1. Create Core Record
+    const empID = "KOM-" + (1000 + coreSheet.getLastRow());
+    coreSheet.appendRow([
+      empID,
+      name,
+      email,
+      row[2] || 'agent', // Role
+      row[7] || 'Active', // Status
+      row[6] || '',       // Direct Manager
+      '',                 // Functional Manager
+      row[3] || 0,        // Annual
+      row[4] || 0,        // Sick
+      row[5] || 0,        // Casual
+      "", "", "", "", "", "", "", "", "", "", "", "", "", "", "Migrated"
+    ]);
+
+    // 2. Create PII Record
+    const hiringDate = row[8] ? new Date(row[8]) : "";
+    piiSheet.appendRow([
+      empID,
+      hiringDate,
+      "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", "", ""
+    ]);
+
+    // 3. Create Folder
+    try {
+      const personalFolder = empFilesFolder.createFolder(`${name}_${empID}`);
+      personalFolder.createFolder("Payslips");
+      personalFolder.createFolder("Onboarding_Docs");
+      personalFolder.createFolder("Sick_Notes");
+    } catch (e) {
+      Logger.log(`Folder error for ${name}: ${e.message}`);
+    }
+
+    existingEmails.add(email);
+    count++;
+  }
+
+  return `Migration Complete. ${count} new users migrated.`;
+}
